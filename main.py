@@ -82,9 +82,10 @@ while True:
 
     # Mark forward edge
     cv2.line(frame, (320, 480), (forwardEdge[1], forwardEdge[0]), (0, 255, 0), 3)
-
+    obstacle_detected=False
     # Determine direction (no motor movement)
     if forwardEdge[0] > 250:
+        obstacle_detected=True
         if y[1] < 310:
             direction = "Obstacle: LEFT"
         else:
@@ -93,6 +94,21 @@ while True:
         direction = "Path: FORWARD"
 
     print(direction)
+    if obstacle_detected:
+        box_size = 40
+        top_left = (forwardEdge[1] - box_size // 2, forwardEdge[0] - box_size // 2)
+        bottom_right = (forwardEdge[1] + box_size // 2, forwardEdge[0] + box_size // 2)
+        cv2.rectangle(frame, top_left, bottom_right, (0, 0, 255), 2)
+        cv2.putText(frame, "Detected", (top_left[0], top_left[1] - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+    # Color-coded direction suggestion
+    if "FORWARD" in direction:
+        color = (0, 255, 0)
+    else:
+        color = (0, 0, 255)
+
+    cv2.putText(frame, direction, (150, 470),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2, cv2.LINE_AA)
 
     # Save frame and log
     cv2.imwrite(name, frame)
