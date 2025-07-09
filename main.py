@@ -16,12 +16,7 @@ if not os.path.exists('data'):
 if testmode == 1:
     F = open("./data/imagedetails.txt", 'a')
     F.write("\n\nNew Test \n")
-def convert_to_yolo(img_width, img_height, x_min, y_min, x_max, y_max):
-    x_center = (x_min + x_max) / 2.0 / img_width
-    y_center = (y_min + y_max) / 2.0 / img_height
-    width = (x_max - x_min) / img_width
-    height = (y_max - y_min) / img_height
-    return x_center, y_center, width, height
+
 def calc_dist(p1, p2):
     return np.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
 
@@ -32,16 +27,18 @@ def getChunks(l, n):
     return a
 
 # Start camera
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(1)
 
 while True:
     _, frame = cap.read()
     name = './data/frame' + str(currentFrame) + '.jpg'
-    name1 = './dataset/train/frame' + str(currentFrame) + '.jpg'
-    labeling=open("./dataset/label/"+ str(currentFrame) +".txt", 'w')
+    name1='./dataset/train/frame' + str(currentFrame) + '.jpg'
+    name2='./dataset/val/frame' + str(currentFrame) + '.jpg'
+    labeler=open('./dataset/label/frame' + str(currentFrame) + '.txt','w')
     print('Processing...', name)
 
     img = frame.copy()
+    # thanks Pranshu Raj for help
 
     # Smooth and detect edges
     blur = cv2.bilateralFilter(img, 9, 40, 40)
@@ -86,7 +83,6 @@ while True:
 
     forwardEdge = c[1]
     y = min(c)
-    y_max=max(c)
 
     # Mark forward edge
     cv2.line(frame, (320, 480), (forwardEdge[1], forwardEdge[0]), (0, 255, 0), 3)
@@ -103,12 +99,25 @@ while True:
 
     print(direction)
     if obstacle_detected:
-        box_size = 40
+        box_size = 200
         top_left = (forwardEdge[1] - box_size // 2, forwardEdge[0] - box_size // 2)
         bottom_right = (forwardEdge[1] + box_size // 2, forwardEdge[0] + box_size // 2)
         cv2.rectangle(frame, top_left, bottom_right, (0, 0, 255), 2)
         cv2.putText(frame, "Detected", (top_left[0], top_left[1] - 10), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        x_min,y_min=top_left
+        x_max,y_max=bottom_right
+        x_center = (x_min + x_max) // 2
+        y_center = (y_min + y_max) // 2
+        width = x_max - x_min
+        height = y_max - y_min
+        x_center/=img_w
+        y_center/=img_h
+        
+        labeler.write(f"0 {x_center:.6f} {y_center:6f} {width:6f} {height:6f}\n")
+        
+    else:
+        pass
     # Color-coded direction suggestion
     if "FORWARD" in direction:
         color = (0, 255, 0)
@@ -120,14 +129,21 @@ while True:
 
     # Save frame and log
     cv2.imwrite(name, frame)
-    cv2.imwrite(name1, frame)
-
+    
+        
     if testmode == 1:
         F.write("frame" + str(currentFrame) + ".jpg | " +
                 str(c[0]) + " | " + str(c[1]) + " | " +
                 str(c[2]) + " | " + direction + "\n")
-        labeling.write(convert_to_yolo(img_w, img_h, x_min, y, x_max, y_max))
+         
         currentFrame += 1
+        resized=cv2.resize(frame,(500,500))
+        if currentFrame <1000:
+            cv2.imwrite(name1, frame)
+        else:
+            cv2.imwrite(name2, frame)
+
+        cv2.imshow("Original Frame", resized)
 
     if testmode == 2:
         resized=cv2.resize(frame,(500,500))
@@ -143,3 +159,4 @@ cap.release()
 cv2.destroyAllWindows()
 if testmode == 1:
     F.close()
+    labeler.close()
