@@ -7,7 +7,7 @@ import os
 # Initialize constants
 StepSize = 5
 currentFrame = 0
-testmode = 2  # 1: Save and log data | 2: Show frames only
+testmode = 1  # 1: Save and log data | 2: Show frames only
 
 # Create output directory
 if not os.path.exists('data'):
@@ -16,7 +16,12 @@ if not os.path.exists('data'):
 if testmode == 1:
     F = open("./data/imagedetails.txt", 'a')
     F.write("\n\nNew Test \n")
-
+def convert_to_yolo(img_width, img_height, x_min, y_min, x_max, y_max):
+    x_center = (x_min + x_max) / 2.0 / img_width
+    y_center = (y_min + y_max) / 2.0 / img_height
+    width = (x_max - x_min) / img_width
+    height = (y_max - y_min) / img_height
+    return x_center, y_center, width, height
 def calc_dist(p1, p2):
     return np.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
 
@@ -32,6 +37,8 @@ cap = cv2.VideoCapture(0)
 while True:
     _, frame = cap.read()
     name = './data/frame' + str(currentFrame) + '.jpg'
+    name1 = './dataset/train/frame' + str(currentFrame) + '.jpg'
+    labeling=open("./dataset/label/"+ str(currentFrame) +".txt", 'w')
     print('Processing...', name)
 
     img = frame.copy()
@@ -79,6 +86,7 @@ while True:
 
     forwardEdge = c[1]
     y = min(c)
+    y_max=max(c)
 
     # Mark forward edge
     cv2.line(frame, (320, 480), (forwardEdge[1], forwardEdge[0]), (0, 255, 0), 3)
@@ -112,11 +120,13 @@ while True:
 
     # Save frame and log
     cv2.imwrite(name, frame)
+    cv2.imwrite(name1, frame)
 
     if testmode == 1:
         F.write("frame" + str(currentFrame) + ".jpg | " +
                 str(c[0]) + " | " + str(c[1]) + " | " +
                 str(c[2]) + " | " + direction + "\n")
+        labeling.write(convert_to_yolo(img_w, img_h, x_min, y, x_max, y_max))
         currentFrame += 1
 
     if testmode == 2:
