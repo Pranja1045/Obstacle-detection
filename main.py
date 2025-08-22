@@ -3,14 +3,10 @@ import cv2
 import numpy as np
 
 def process_frame(frame):
-    
     StepSize = 5
-
     img = frame.copy()
-
     blur = cv2.bilateralFilter(img, 9, 40, 40)
     edges = cv2.Canny(blur, 50, 100)
-
     img_h, img_w, _ = img.shape
 
     EdgeArray = []
@@ -22,8 +18,8 @@ def process_frame(frame):
                 break
         EdgeArray.append(pixel)
 
-    if len(EdgeArray) < 3: 
-        return frame, edges 
+    if len(EdgeArray) < 3:
+        return frame, edges
 
     num_chunks = 3
     chunks = np.array_split(EdgeArray, num_chunks)
@@ -47,13 +43,13 @@ def process_frame(frame):
     direction = "Path: FORWARD"
     color = (0, 255, 0)
 
-    if forward_point[1] < (img_h * 0.7): 
+    if forward_point[1] < (img_h * 0.7):
         obstacle_detected = True
         if left_point[1] > right_point[1]:
             direction = "Obstacle: Turn LEFT"
         else:
             direction = "Obstacle: Turn RIGHT"
-        color = (0, 0, 255) 
+        color = (0, 0, 255)
 
         box_center = forward_point
         box_size = 150
@@ -67,8 +63,6 @@ def process_frame(frame):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2, cv2.LINE_AA)
                 
     return frame, edges
-
-
 
 st.set_page_config(page_title="Live Obstacle Detection", layout="wide")
 
@@ -100,7 +94,7 @@ frame_placeholder = col1.empty()
 if show_edges:
     edges_placeholder = col2.empty()
 else:
-    col2.empty() 
+    col2.empty()
 
 if st.session_state.is_running:
     cap = cv2.VideoCapture(camera_index)
@@ -123,10 +117,8 @@ if st.session_state.is_running:
                 edges_placeholder.image(edges_frame, caption="Canny Edges")
 
         cap.release()
-        if not stop: 
+        if not stop:
              st.info("Stream ended. Press 'Start Camera' to run again.")
 
 elif not st.session_state.is_running:
     frame_placeholder.info("Camera is off. Press 'Start Camera' in the sidebar to begin streaming.")
-
-cv2.destroyAllWindows()
