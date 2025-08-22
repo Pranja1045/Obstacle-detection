@@ -74,6 +74,7 @@ st.set_page_config(page_title="Live Obstacle Detection", layout="wide")
 
 st.title("🤖 Live Obstacle Detection and Path Planning")
 st.caption("This app uses OpenCV to detect a clear path from a live camera feed.")
+st.sidebar.title("Made by Mahi Priyadarshi ❤️ ")
 
 st.sidebar.header("Configuration")
 camera_source = st.sidebar.selectbox("Select Camera Source", ("Use Webcam (0)", "Use External Cam (1)"), index=0)
