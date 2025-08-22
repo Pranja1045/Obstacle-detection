@@ -1,20 +1,8 @@
 import streamlit as st
 import cv2
 import numpy as np
-import tempfile
-import os
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 
-# --- OPTIMIZED Frame Processing Function ---
 def process_frame(frame):
-    # --- PERFORMANCE OPTIMIZATION 1: Resize the frame ---
-    # Processing smaller frames is much faster.
-    RESIZE_WIDTH = 480
-    height, width, _ = frame.shape
-    scale = RESIZE_WIDTH / width
-    resized_height = int(height * scale)
-    frame = cv2.resize(frame, (RESIZE_WIDTH, resized_height))
-
     StepSize = 5
     img = frame.copy()
     blur = cv2.bilateralFilter(img, 9, 40, 40)
@@ -22,17 +10,12 @@ def process_frame(frame):
     img_h, img_w, _ = img.shape
 
     EdgeArray = []
-    # --- PERFORMANCE OPTIMIZATION 2: Vectorized Edge Finding ---
-    # This replaces the slow nested Python loops with a fast NumPy operation.
     for j in range(0, img_w, StepSize):
-        column = edges[:, j] # Get the entire column
-        indices = np.where(column > 0)[0] # Find all non-zero pixel indices
-        if indices.size > 0:
-            # Get the last (lowest) index, which is the edge point
-            pixel = (j, indices[-1])
-        else:
-            # If no edge is found, default to the bottom of the frame
-            pixel = (j, img_h - 1)
+        pixel = (j, 0)
+        for i in range(img_h - 10, 0, -1):
+            if edges.item(i, j) == 255:
+                pixel = (j, i)
+                break
         EdgeArray.append(pixel)
 
     if len(EdgeArray) < 3:
@@ -52,6 +35,7 @@ def process_frame(frame):
             cv2.line(frame, (img_w // 2, img_h), (avg_x, avg_y), (255, 0, 0), 2)
 
     if len(avg_points) < num_chunks:
+        st.warning("Not all path segments were detected clearly.")
         return frame, edges
 
     left_point, forward_point, right_point = avg_points
@@ -59,8 +43,8 @@ def process_frame(frame):
     direction = "Path: FORWARD"
     color = (0, 255, 0)
 
-    # Obstacle detection threshold adjusted for the resized frame
     if forward_point[1] < (img_h * 0.7):
+        obstacle_detected = True
         if left_point[1] > right_point[1]:
             direction = "Obstacle: Turn LEFT"
         else:
@@ -68,89 +52,73 @@ def process_frame(frame):
         color = (0, 0, 255)
 
         box_center = forward_point
-        box_size = 100 # Box size adjusted for smaller frame
+        box_size = 150
         top_left = (box_center[0] - box_size // 2, box_center[1] - box_size // 2)
         bottom_right = (box_center[0] + box_size // 2, box_center[1] + box_size // 2)
         cv2.rectangle(frame, top_left, bottom_right, color, 2)
         cv2.putText(frame, "OBSTACLE", (top_left[0], top_left[1] - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
     
-    cv2.putText(frame, direction, (img_w // 2 - 120, img_h - 20),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA)
+    cv2.putText(frame, direction, (img_w // 2 - 150, img_h - 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2, cv2.LINE_AA)
                 
     return frame, edges
 
-# --- WebRTC Video Transformer ---
-class ObstacleDetector(VideoTransformerBase):
-    def __init__(self):
-        self.show_edges = False
-
-    def set_show_edges(self, show_edges):
-        self.show_edges = show_edges
-
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        processed_frame, edges_frame = process_frame(img)
-        
-        # The output frame of the transformer must be the same size as the input.
-        # We resize our processed frame back to the original size.
-        original_height, original_width, _ = img.shape
-        if self.show_edges:
-            # Convert edges to color so it can be resized properly
-            edges_color = cv2.cvtColor(edges_frame, cv2.COLOR_GRAY2BGR)
-            return cv2.resize(edges_color, (original_width, original_height))
-        else:
-            return cv2.resize(processed_frame, (original_width, original_height))
-
-# --- Streamlit App UI ---
 st.set_page_config(page_title="Live Obstacle Detection", layout="wide")
 
-st.title("🤖 Obstacle Detection and Path Planning")
-st.caption("Process a live webcam feed or upload a video file.")
-st.sidebar.title("Made by Mahi Priyadarshi ❤️")
+st.title("🤖 Live Obstacle Detection and Path Planning")
+st.caption("This app uses OpenCV to detect a clear path from a live camera feed.")
+st.sidebar.title("Made by Mahi Priyadarshi ❤️ ")
+
 st.sidebar.header("Configuration")
+camera_source = st.sidebar.selectbox("Select Camera Source", ("Use Webcam (0)", "Use External Cam (1)"), index=0)
+camera_index = 0 if camera_source == "Use Webcam (0)" else 1
 
-source_option = st.sidebar.selectbox("Select Input Source", ["Webcam", "Upload Video"])
+show_edges = st.sidebar.checkbox("Show Canny Edges", value=False)
 
-if source_option == "Webcam":
-    st.sidebar.subheader("Webcam Settings")
-    show_edges = st.sidebar.checkbox("Show Canny Edges", value=False)
-    
-    ctx = webrtc_streamer(
-        key="obstacle-detection",
-        video_processor_factory=ObstacleDetector,
-        media_stream_constraints={"video": True, "audio": False},
-        async_processing=True,
-    )
-    
-    if ctx.video_processor:
-        ctx.video_processor.set_show_edges(show_edges)
+st.sidebar.markdown("---")
+run = st.sidebar.button("▶️ Start Camera")
+stop = st.sidebar.button("⏹️ Stop Camera")
+st.sidebar.markdown("---")
 
-elif source_option == "Upload Video":
-    st.sidebar.subheader("Video Upload Settings")
-    uploaded_file = st.sidebar.file_uploader("Choose a video file...", type=["mp4", "mov", "avi", "mkv"])
-    run = st.sidebar.button("▶️ Start Processing")
+if 'is_running' not in st.session_state:
+    st.session_state.is_running = False
 
-    if run and uploaded_file:
-        video_source = None
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tfile:
-            tfile.write(uploaded_file.read())
-            video_source = tfile.name
-        
-        if video_source:
-            cap = cv2.VideoCapture(video_source)
-            frame_placeholder = st.empty()
+if run:
+    st.session_state.is_running = True
+if stop:
+    st.session_state.is_running = False
+
+col1, col2 = st.columns(2)
+frame_placeholder = col1.empty()
+if show_edges:
+    edges_placeholder = col2.empty()
+else:
+    col2.empty()
+
+if st.session_state.is_running:
+    cap = cv2.VideoCapture(camera_index)
+    if not cap.isOpened():
+        st.error(f"Error: Could not open camera at index {camera_index}.")
+    else:
+        st.success("Camera started successfully! Streaming...")
+        while st.session_state.is_running and cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                st.warning("Failed to grab frame from camera. Stream might have ended.")
+                break
+
+            processed_frame, edges_frame = process_frame(frame)
             
-            while cap.isOpened():
-                ret, frame = cap.read()
-                if not ret:
-                    st.info("Video processing finished.")
-                    break
-                
-                processed_frame, _ = process_frame(frame)
-                processed_frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-                frame_placeholder.image(processed_frame_rgb, channels="RGB")
+            processed_frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
 
-            cap.release()
-            if os.path.exists(video_source):
-                os.remove(video_source)
+            frame_placeholder.image(processed_frame_rgb, channels="RGB")
+            if show_edges:
+                edges_placeholder.image(edges_frame, caption="Canny Edges")
+
+        cap.release()
+        if not stop:
+             st.info("Stream ended. Press 'Start Camera' to run again.")
+
+elif not st.session_state.is_running:
+    frame_placeholder.info("Camera is off. Press 'Start Camera' in the sidebar to begin streaming.")
