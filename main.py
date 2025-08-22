@@ -1,162 +1,131 @@
-from time import sleep
-#import gpiozero's Robot since we no longer use motors
+import streamlit as st
 import cv2
 import numpy as np
-import math
-import os
-# Initialize constants
-StepSize = 5
-currentFrame = 0
-testmode = 1  # 1: Save and log data | 2: Show frames only
 
-# Create output directory
-if not os.path.exists('data'):
-    os.makedirs('data')
-
-if testmode == 1:
-    F = open("./data/imagedetails.txt", 'a')
-    F.write("\n\nNew Test \n")
-
-def calc_dist(p1, p2):
-    return np.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
-
-def getChunks(l, n):
-    a = []
-    for i in range(0, len(l), n):
-        a.append(l[i:i + n])
-    return a
-
-# Start camera
-cap = cv2.VideoCapture(1)
-
-while True:
-    _, frame = cap.read()
-    name = './data/frame' + str(currentFrame) + '.jpg'
-    name1='./dataset/train/frame' + str(currentFrame) + '.jpg'
-    name2='./dataset/val/frame' + str(currentFrame) + '.jpg'
-    labeler=open('./dataset/label/frame' + str(currentFrame) + '.txt','w')
-    print('Processing...', name)
+def process_frame(frame):
+    
+    StepSize = 5
 
     img = frame.copy()
-    # thanks Pranshu Raj for help
 
-    # Smooth and detect edges
     blur = cv2.bilateralFilter(img, 9, 40, 40)
     edges = cv2.Canny(blur, 50, 100)
 
-    img_h = img.shape[0] - 1
-    img_w = img.shape[1] - 1
+    img_h, img_w, _ = img.shape
 
     EdgeArray = []
-
-    # Extract edge points from bottom-up
     for j in range(0, img_w, StepSize):
         pixel = (j, 0)
-        for i in range(img_h - 5, 0, -1):
+        for i in range(img_h - 10, 0, -1):
             if edges.item(i, j) == 255:
                 pixel = (j, i)
                 break
         EdgeArray.append(pixel)
 
-    # Draw lines between edge points
-    for x in range(len(EdgeArray) - 1):
-        cv2.line(img, EdgeArray[x], EdgeArray[x + 1], (0, 255, 0), 1)
+    if len(EdgeArray) < 3: 
+        return frame, edges 
 
-    for x in range(len(EdgeArray)):
-        cv2.line(img, (x * StepSize, img_h), EdgeArray[x], (0, 255, 0), 1)
-
-    # Divide into chunks and compute average edge
-    chunks = getChunks(EdgeArray, int(len(EdgeArray) / 3))
-    c = []
-
-    for i in range(len(chunks) - 1):
-        x_vals = [x for (x, _) in chunks[i]]
-        y_vals = [y for (_, y) in chunks[i]]
-        avg_x = int(np.average(x_vals))
-        avg_y = int(np.average(y_vals))
-        c.append([avg_y, avg_x])
-        cv2.line(frame, (320, 480), (avg_x, avg_y), (255, 0, 0), 2)
-
-    if len(c) < 3:
-        print("Not enough segments detected.")
-        continue
-
-    forwardEdge = c[1]
-    y = min(c)
-
-    # Mark forward edge
-    cv2.line(frame, (320, 480), (forwardEdge[1], forwardEdge[0]), (0, 255, 0), 3)
-    obstacle_detected=False
-    # Determine direction (no motor movement)
-    if forwardEdge[0] > 250:
-        obstacle_detected=True
-        if y[1] < 310:
-            direction = "Obstacle: LEFT"
-        else:
-            direction = "Obstacle: RIGHT"
-    else:
-        direction = "Path: FORWARD"
-
-    print(direction)
-    if obstacle_detected:
-        box_size = 200
-        top_left = (forwardEdge[1] - box_size // 2, forwardEdge[0] - box_size // 2)
-        bottom_right = (forwardEdge[1] + box_size // 2, forwardEdge[0] + box_size // 2)
-        cv2.rectangle(frame, top_left, bottom_right, (0, 0, 255), 2)
-        cv2.putText(frame, "Detected", (top_left[0], top_left[1] - 10), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-        x_min,y_min=top_left
-        x_max,y_max=bottom_right
-        x_center = (x_min + x_max) // 2
-        y_center = (y_min + y_max) // 2
-        width = x_max - x_min
-        height = y_max - y_min
-        x_center/=img_w
-        y_center/=img_h
-        
-        labeler.write(f"0 {x_center:.6f} {y_center:6f} {width:6f} {height:6f}\n")
-        
-    else:
-        pass
-    # Color-coded direction suggestion
-    if "FORWARD" in direction:
-        color = (0, 255, 0)
-    else:
-        color = (0, 0, 255)
-
-    cv2.putText(frame, direction, (150, 470),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2, cv2.LINE_AA)
-
-    # Save frame and log
-    cv2.imwrite(name, frame)
+    num_chunks = 3
+    chunks = np.array_split(EdgeArray, num_chunks)
     
-        
-    if testmode == 1:
-        F.write("frame" + str(currentFrame) + ".jpg | " +
-                str(c[0]) + " | " + str(c[1]) + " | " +
-                str(c[2]) + " | " + direction + "\n")
-         
-        currentFrame += 1
-        resized=cv2.resize(frame,(500,500))
-        if currentFrame <1000:
-            cv2.imwrite(name1, frame)
+    avg_points = []
+    for chunk in chunks:
+        if chunk.size > 0:
+            x_vals = [pt[0] for pt in chunk]
+            y_vals = [pt[1] for pt in chunk]
+            avg_x = int(np.average(x_vals))
+            avg_y = int(np.average(y_vals))
+            avg_points.append((avg_x, avg_y))
+            cv2.line(frame, (img_w // 2, img_h), (avg_x, avg_y), (255, 0, 0), 2)
+
+    if len(avg_points) < num_chunks:
+        st.warning("Not all path segments were detected clearly.")
+        return frame, edges
+
+    left_point, forward_point, right_point = avg_points
+    
+    direction = "Path: FORWARD"
+    color = (0, 255, 0)
+
+    if forward_point[1] < (img_h * 0.7): 
+        obstacle_detected = True
+        if left_point[1] > right_point[1]:
+            direction = "Obstacle: Turn LEFT"
         else:
-            cv2.imwrite(name2, frame)
+            direction = "Obstacle: Turn RIGHT"
+        color = (0, 0, 255) 
 
-        cv2.imshow("Original Frame", resized)
+        box_center = forward_point
+        box_size = 150
+        top_left = (box_center[0] - box_size // 2, box_center[1] - box_size // 2)
+        bottom_right = (box_center[0] + box_size // 2, box_center[1] + box_size // 2)
+        cv2.rectangle(frame, top_left, bottom_right, color, 2)
+        cv2.putText(frame, "OBSTACLE", (top_left[0], top_left[1] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+    
+    cv2.putText(frame, direction, (img_w // 2 - 150, img_h - 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2, cv2.LINE_AA)
+                
+    return frame, edges
 
-    if testmode == 2:
-        resized=cv2.resize(frame,(500,500))
-        resized1=cv2.resize(edges,(500,500))
-        cv2.imshow("Original Frame", resized)
-        cv2.imshow("Canny Edges", resized1)
 
-    if cv2.waitKey(5) & 0xFF == 27:  # Press Esc to quit
-        break
 
-# Cleanup
-cap.release()
+st.set_page_config(page_title="Live Obstacle Detection", layout="wide")
+
+st.title("🤖 Live Obstacle Detection and Path Planning")
+st.caption("This app uses OpenCV to detect a clear path from a live camera feed.")
+
+st.sidebar.header("Configuration")
+camera_source = st.sidebar.selectbox("Select Camera Source", ("Use Webcam (0)", "Use External Cam (1)"), index=0)
+camera_index = 0 if camera_source == "Use Webcam (0)" else 1
+
+show_edges = st.sidebar.checkbox("Show Canny Edges", value=False)
+
+st.sidebar.markdown("---")
+run = st.sidebar.button("▶️ Start Camera")
+stop = st.sidebar.button("⏹️ Stop Camera")
+st.sidebar.markdown("---")
+
+if 'is_running' not in st.session_state:
+    st.session_state.is_running = False
+
+if run:
+    st.session_state.is_running = True
+if stop:
+    st.session_state.is_running = False
+
+col1, col2 = st.columns(2)
+frame_placeholder = col1.empty()
+if show_edges:
+    edges_placeholder = col2.empty()
+else:
+    col2.empty() 
+
+if st.session_state.is_running:
+    cap = cv2.VideoCapture(camera_index)
+    if not cap.isOpened():
+        st.error(f"Error: Could not open camera at index {camera_index}.")
+    else:
+        st.success("Camera started successfully! Streaming...")
+        while st.session_state.is_running and cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                st.warning("Failed to grab frame from camera. Stream might have ended.")
+                break
+
+            processed_frame, edges_frame = process_frame(frame)
+            
+            processed_frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+
+            frame_placeholder.image(processed_frame_rgb, channels="RGB")
+            if show_edges:
+                edges_placeholder.image(edges_frame, caption="Canny Edges")
+
+        cap.release()
+        if not stop: 
+             st.info("Stream ended. Press 'Start Camera' to run again.")
+
+elif not st.session_state.is_running:
+    frame_placeholder.info("Camera is off. Press 'Start Camera' in the sidebar to begin streaming.")
+
 cv2.destroyAllWindows()
-if testmode == 1:
-    F.close()
-    labeler.close()
