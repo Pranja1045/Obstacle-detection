@@ -1,0 +1,2 @@
+cv2opencv-python-headless
+numpy
