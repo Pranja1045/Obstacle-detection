@@ -5,8 +5,16 @@ import tempfile
 import os
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 
-# The process_frame function remains the same.
+# --- OPTIMIZED Frame Processing Function ---
 def process_frame(frame):
+    # --- PERFORMANCE OPTIMIZATION 1: Resize the frame ---
+    # Processing smaller frames is much faster.
+    RESIZE_WIDTH = 480
+    height, width, _ = frame.shape
+    scale = RESIZE_WIDTH / width
+    resized_height = int(height * scale)
+    frame = cv2.resize(frame, (RESIZE_WIDTH, resized_height))
+
     StepSize = 5
     img = frame.copy()
     blur = cv2.bilateralFilter(img, 9, 40, 40)
@@ -14,12 +22,17 @@ def process_frame(frame):
     img_h, img_w, _ = img.shape
 
     EdgeArray = []
+    # --- PERFORMANCE OPTIMIZATION 2: Vectorized Edge Finding ---
+    # This replaces the slow nested Python loops with a fast NumPy operation.
     for j in range(0, img_w, StepSize):
-        pixel = (j, 0)
-        for i in range(img_h - 10, 0, -1):
-            if edges.item(i, j) == 255:
-                pixel = (j, i)
-                break
+        column = edges[:, j] # Get the entire column
+        indices = np.where(column > 0)[0] # Find all non-zero pixel indices
+        if indices.size > 0:
+            # Get the last (lowest) index, which is the edge point
+            pixel = (j, indices[-1])
+        else:
+            # If no edge is found, default to the bottom of the frame
+            pixel = (j, img_h - 1)
         EdgeArray.append(pixel)
 
     if len(EdgeArray) < 3:
@@ -39,7 +52,6 @@ def process_frame(frame):
             cv2.line(frame, (img_w // 2, img_h), (avg_x, avg_y), (255, 0, 0), 2)
 
     if len(avg_points) < num_chunks:
-        # Avoid st.warning in the callback as it can clutter the UI
         return frame, edges
 
     left_point, forward_point, right_point = avg_points
@@ -47,6 +59,7 @@ def process_frame(frame):
     direction = "Path: FORWARD"
     color = (0, 255, 0)
 
+    # Obstacle detection threshold adjusted for the resized frame
     if forward_point[1] < (img_h * 0.7):
         if left_point[1] > right_point[1]:
             direction = "Obstacle: Turn LEFT"
@@ -55,20 +68,19 @@ def process_frame(frame):
         color = (0, 0, 255)
 
         box_center = forward_point
-        box_size = 150
+        box_size = 100 # Box size adjusted for smaller frame
         top_left = (box_center[0] - box_size // 2, box_center[1] - box_size // 2)
         bottom_right = (box_center[0] + box_size // 2, box_center[1] + box_size // 2)
         cv2.rectangle(frame, top_left, bottom_right, color, 2)
         cv2.putText(frame, "OBSTACLE", (top_left[0], top_left[1] - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
     
-    cv2.putText(frame, direction, (img_w // 2 - 150, img_h - 20),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2, cv2.LINE_AA)
+    cv2.putText(frame, direction, (img_w // 2 - 120, img_h - 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA)
                 
     return frame, edges
 
 # --- WebRTC Video Transformer ---
-# This class will be used by streamlit-webrtc to process frames in real-time.
 class ObstacleDetector(VideoTransformerBase):
     def __init__(self):
         self.show_edges = False
@@ -77,17 +89,18 @@ class ObstacleDetector(VideoTransformerBase):
         self.show_edges = show_edges
 
     def recv(self, frame):
-        # Convert the frame to a NumPy array that OpenCV can use
         img = frame.to_ndarray(format="bgr24")
-        
-        # Process the frame using your existing logic
         processed_frame, edges_frame = process_frame(img)
-
-        # Conditionally return the edges or the main processed frame
+        
+        # The output frame of the transformer must be the same size as the input.
+        # We resize our processed frame back to the original size.
+        original_height, original_width, _ = img.shape
         if self.show_edges:
-            return edges_frame
+            # Convert edges to color so it can be resized properly
+            edges_color = cv2.cvtColor(edges_frame, cv2.COLOR_GRAY2BGR)
+            return cv2.resize(edges_color, (original_width, original_height))
         else:
-            return processed_frame
+            return cv2.resize(processed_frame, (original_width, original_height))
 
 # --- Streamlit App UI ---
 st.set_page_config(page_title="Live Obstacle Detection", layout="wide")
@@ -103,7 +116,6 @@ if source_option == "Webcam":
     st.sidebar.subheader("Webcam Settings")
     show_edges = st.sidebar.checkbox("Show Canny Edges", value=False)
     
-    # The main webrtc_streamer component
     ctx = webrtc_streamer(
         key="obstacle-detection",
         video_processor_factory=ObstacleDetector,
@@ -111,7 +123,6 @@ if source_option == "Webcam":
         async_processing=True,
     )
     
-    # Pass the checkbox value to the video processor
     if ctx.video_processor:
         ctx.video_processor.set_show_edges(show_edges)
 
