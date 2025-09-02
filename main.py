@@ -2,6 +2,21 @@ import streamlit as st
 import cv2
 import numpy as np
 
+
+KNOWN_DISTANCE_CM = 10.0  
+KNOWN_PIXEL_Y = 400       
+
+def estimate_distance(pixel_y, img_h):
+    
+    if pixel_y == 0:
+        return float('inf') 
+    
+    focal_length_approx = (KNOWN_PIXEL_Y * KNOWN_DISTANCE_CM)
+    
+    distance = focal_length_approx / pixel_y
+    return distance
+
+
 def process_frame(frame):
     StepSize = 5
     img = frame.copy()
@@ -12,6 +27,7 @@ def process_frame(frame):
     EdgeArray = []
     for j in range(0, img_w, StepSize):
         pixel = (j, 0)
+        
         for i in range(img_h - 10, 0, -1):
             if edges.item(i, j) == 255:
                 pixel = (j, i)
@@ -43,12 +59,16 @@ def process_frame(frame):
     direction = "Path: FORWARD"
     color = (0, 255, 0)
 
-    if forward_point[1] < (img_h * 0.7):
+    if forward_point[1] < (img_h * 0.85): # Trigger obstacle logic sooner
         obstacle_detected = True
+        
+        dist_cm = estimate_distance(forward_point[1], img_h)
+        distance_text = f"{dist_cm:.1f} cm"
+
         if left_point[1] > right_point[1]:
-            direction = "Obstacle: Turn LEFT"
+            direction = f"Obstacle: Turn LEFT"
         else:
-            direction = "Obstacle: Turn RIGHT"
+            direction = f"Obstacle: Turn RIGHT"
         color = (0, 0, 255)
 
         box_center = forward_point
@@ -56,10 +76,13 @@ def process_frame(frame):
         top_left = (box_center[0] - box_size // 2, box_center[1] - box_size // 2)
         bottom_right = (box_center[0] + box_size // 2, box_center[1] + box_size // 2)
         cv2.rectangle(frame, top_left, bottom_right, color, 2)
-        cv2.putText(frame, "OBSTACLE", (top_left[0], top_left[1] - 10),
+        
+        cv2.putText(frame, "OBSTACLE", (top_left[0], top_left[1] - 35),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        cv2.putText(frame, distance_text, (top_left[0], top_left[1] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
     
-    cv2.putText(frame, direction, (img_w // 2 - 150, img_h - 20),
+    cv2.putText(frame, direction, (img_w // 2 - 200, img_h - 20),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2, cv2.LINE_AA)
                 
     return frame, edges
@@ -80,6 +103,8 @@ st.sidebar.markdown("---")
 run = st.sidebar.button("▶️ Start Camera")
 stop = st.sidebar.button("⏹️ Stop Camera")
 st.sidebar.markdown("---")
+st.sidebar.info("Remember to calibrate the distance constants in the code for accurate results.")
+
 
 if 'is_running' not in st.session_state:
     st.session_state.is_running = False
@@ -118,7 +143,7 @@ if st.session_state.is_running:
 
         cap.release()
         if not stop:
-             st.info("Stream ended. Press 'Start Camera' to run again.")
+              st.info("Stream ended. Press 'Start Camera' to run again.")
 
 elif not st.session_state.is_running:
     frame_placeholder.info("Camera is off. Press 'Start Camera' in the sidebar to begin streaming.")
